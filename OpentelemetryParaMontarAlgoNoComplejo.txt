@@ -1,0 +1,249 @@
+OpenTelemetry Java
+https://opentelemetry.io/docs/languages/java/ (opentelemetry.io in Bing)
+
+Auto-instrumentación Java
+https://opentelemetry.io/docs/languages/java/automatic/ (opentelemetry.io in Bing)
+
+OpenTelemetry Collector
+https://opentelemetry.io/docs/collector/
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases
+
+
+Propósito	Dependencia
+API de OpenTelemetry	io.opentelemetry:opentelemetry-api
+SDK (implementación)	io.opentelemetry:opentelemetry-sdk
+Exportador OTLP	io.opentelemetry:opentelemetry-exporter-otlp
+Auto-instrumentación (agente)	opentelemetry-javaagent.jar
+🧩 2. Configuración con Maven
+xml
+<dependencies>
+    <!-- API principal -->
+    <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-api</artifactId>
+        <version>1.43.0</version>
+    </dependency>
+
+    <!-- SDK -->
+    <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-sdk</artifactId>
+        <version>1.43.0</version>
+    </dependency>
+
+    <!-- Exportador OTLP (trazas, métricas, logs) -->
+    <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-exporter-otlp</artifactId>
+        <version>1.43.0</version>
+    </dependency>
+</dependencies>
+Si quieres instrumentación automática (lo más habitual en microservicios):
+
+bash
+java -javaagent:opentelemetry-javaagent.jar \
+     -Dotel.service.name=mi-servicio \
+     -Dotel.exporter.otlp.endpoint=http://localhost:4317 \
+     -jar mi-app.jar
+🧩 3. Configuración con Gradle (Groovy DSL)
+gradle
+dependencies {
+    implementation "io.opentelemetry:opentelemetry-api:1.43.0"
+    implementation "io.opentelemetry:opentelemetry-sdk:1.43.0"
+    implementation "io.opentelemetry:opentelemetry-exporter-otlp:1.43.0"
+}
+🚀 4. Auto-instrumentación (lo más potente y fácil)
+La forma más sólida de montar telemetría en Java es usar el agente oficial:
+
+📦 Descargar:
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases (github.com in Bing)
+
+Incluye instrumentación automática para:
+
+Spring Boot
+
+JDBC
+
+Kafka
+
+Redis
+
+gRPC
+
+HTTP clients
+
+JPA/Hibernate
+
+Tomcat / Jetty / Undertow
+
+Y más de 100 librerías
+
+Solo necesitas arrancar tu app con el agente y variables de entorno.
+
+🌐 5. Configuración típica de entorno
+bash
+export OTEL_SERVICE_NAME=mi-servicio
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+🏗️ 6. Arquitectura recomendada para “cosas grandes”
+Si quieres montar algo serio de narices, esta es la arquitectura estándar:
+
+Código
+[Aplicaciones Java] --OTLP--> [Collector OpenTelemetry] --> [Destino]
+                                                   ├──> Jaeger
+                                                   ├──> Prometheus
+                                                   ├──> Loki
+                                                   ├──> Elastic
+                                                   └──> Grafana Tempo
+El Collector es clave porque:
+
+desacopla tus apps del backend
+
+permite batching, retries, filtrado, sampling
+
+escala mejor
+
+📚 7. Documentación oficial útil
+OpenTelemetry Java
+https://opentelemetry.io/docs/languages/java/ (opentelemetry.io in Bing)
+
+Auto-instrumentación Java
+https://opentelemetry.io/docs/languages/java/automatic/ (opentelemetry.io in Bing)
+
+OpenTelemetry Collector
+https://opentelemetry.io/docs/collector/
+
+escarga el agente:
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases (github.com in Bing)
+
+En IntelliJ:
+
+Ve a Run → Edit Configurations
+
+Selecciona tu aplicación
+
+En VM Options, añade:
+
+Código
+-javaagent:/ruta/opentelemetry-javaagent.jar
+-Dotel.service.name=mi-servicio
+-Dotel.exporter.otlp.endpoint=http://localhost:4317
+Ejecuta desde IntelliJ y verás trazas en Jaeger o en tu Collector.
+
+Esto te permite depurar desde IntelliJ con telemetría activa.
+
+✔️ B) Usar dependencias Maven/Gradle dentro del proyecto
+Ya te pasé las dependencias antes, pero IntelliJ las detecta automáticamente:
+
+Maven: IntelliJ importa el pom.xml
+
+Gradle: IntelliJ sincroniza el build.gradle
+
+No necesitas nada más.
+
+🛰️ 2. IntelliJ IDEA + Jaeger
+Jaeger no se integra dentro de IntelliJ, pero sí puedes:
+
+✔️ A) Ejecutar Jaeger desde IntelliJ (Docker)
+Si usas Docker Desktop:
+
+Crea un docker-compose.yml:
+
+yaml
+version: "3"
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+En IntelliJ:
+
+Abre la pestaña Services
+
+Añade un Docker Compose
+
+Ejecuta Jaeger desde el IDE
+
+Acceso a Jaeger UI:
+http://localhost:16686
+
+✔️ B) Ver trazas desde IntelliJ
+No hay un “viewer” de Jaeger dentro del IDE, pero sí puedes:
+
+Abrir Jaeger en el navegador desde IntelliJ (clic derecho → Open in Browser)
+
+Usar el plugin OpenTelemetry Proto Viewer para ver spans en archivos .json o .proto
+
+🗄️ 3. IntelliJ IDEA + PostgreSQL
+Aquí sí hay integración directa y muy buena.
+
+✔️ A) Conectar IntelliJ a PostgreSQL
+Abre View → Tool Windows → Database
+
+Pulsa + → Data Source → PostgreSQL
+
+Introduce:
+
+Host
+
+Puerto (5432)
+
+Usuario
+
+Password
+
+Base de datos
+
+IntelliJ descargará automáticamente el driver JDBC.
+
+Puedes:
+
+Ejecutar queries
+
+Ver tablas
+
+Editar datos
+
+Generar diagramas ER
+
+Exportar/importar datos.
+postgres:
+  image: postgres:16
+  environment:
+    POSTGRES_USER: admin
+    POSTGRES_PASSWORD: admin
+    POSTGRES_DB: demo
+  ports:
+    - "5432:5432"
+IntelliJ detecta el contenedor y te permite conectarte directamente.
+
+🧩 4. IntelliJ + OpenTelemetry + PostgreSQL (instrumentación)
+Si usas el agente de OpenTelemetry, no tienes que hacer nada extra:
+
+JDBC (PostgreSQL incluido) se instrumenta automáticamente
+
+Verás spans como:
+
+db.statement
+
+db.system=postgresql
+
+db.operation=SELECT
+
+Esto funciona tanto si ejecutas desde IntelliJ como desde terminal.
+
+📚 5. Documentación útil
+Aunque no es específica de IntelliJ, sí es relevante:
+
+OpenTelemetry Java Automatic Instrumentation
+https://opentelemetry.io/docs/languages/java/automatic/ (opentelemetry.io in Bing)
+
+Jaeger Getting Started
+https://www.jaegertracing.io/docs/
+
+IntelliJ Database Tools
+https://www.jetbrains.com/help/idea/connecting-to-a-database.html (jetbrains.com in Bing)
