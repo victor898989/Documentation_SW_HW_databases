@@ -1,0 +1,151 @@
+https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#cloud-controller-manager
+https://juno-fx.github.io/Orion-Documentation/installation/install/auth/#aws-cognito-authentication
+https://juno-fx.github.io/Orion-Documentation/installation/install/auth/#aws-cognito-authentication
+https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#cloud-controller-manager
+https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+Instrumentation/src/Java
+JBCD postgreSQL
+ERRORES archivos
+SVN-git:https://git-scm.com/docs/git-svn
+
+
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cloud-controller-manager
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - nodes/status
+  verbs:
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services/status
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumes
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+
+Administración
+Requisitos
+Cada nube tiene su propio conjunto de requisitos para gestionar su propio proveedor de nube integración, no debería ser demasiado diferente de los requisitos al ejecutarse. Como regla general, necesitarás:kube-controller-manager
+
+Autenticación/autorización en la nube: tu nube puede requerir un token o reglas IAM para permitir el acceso a sus APIs
+Autenticación/Autorización Kubernetes: Cloud-Controller-Manager puede necesitar RBAC Reglas establecidas para hablar con el APISERVER Kubernetes
+Alta disponibilidad: Al igual que Kube-Controller-Manager, puede que quieras un alto disponible Configuración para Cloud Controller Manager usando la elección de líderes (activada por defecto).
+Ejecutando cloud-controller-manager
+Ejecutar correctamente cloud-controller-manager requiere algunos cambios en la configuración de tu clúster.
+
+kubelet, , y deben establecerse según el el uso de CCM externo por parte del usuario. Si el usuario tiene un CCM externo (no la nube interna loops controlador en el Kubernetes Controller Manager), entonces debe especificarse. De lo contrario, no debería especificarse.kube-apiserverkube-controller-manager--cloud-provider=external
+Ten en cuenta que configurar tu clúster para usar Cloud Controller Manager sí Cambia el comportamiento de tu grupo de varias maneras:
+
+Los componentes que especifican añadirán una contaminación con efecto durante la inicialización. Esto marca que el nodo necesita una segunda inicialización desde un controlador externo antes de que pueda programarse el trabajo. Nótese que en el Si el Cloud Controller Manager no está disponible, nuevos nodos en el clúster quedará sin programación. La contaminación es importante porque el planificador puede requieren información específica de la nube sobre nodos, como su región o tipo (CPU alta, GPU, alta memoria, instancias puntuales, etc.).--cloud-provider=externalnode.cloudprovider.kubernetes.io/uninitializedNoSchedule
+La información en la nube sobre nodos en el clúster ya no se recuperará utilizando metadatos locales, pero en su lugar todas las llamadas a la API para recuperar la información del nodo desaparecerán A través del Cloud Controller Manager. Esto puede significar que puedes restringir el acceso a tu API en la nube en los kubelets para mejorar la seguridad. Para clústeres grandes quizá quieras Para considerar si Cloud Controller Manager alcanzará los límites de tasa ya que ahora está responsable de casi todas las llamadas a la API a tu nube desde dentro del clúster.
+
+Si usas una nube que actualmente está soportada en Kubernetes core y Como adoptar Cloud Controller Manager, mira Cloud Controller Manager en Kubernetes Core.
+
+https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/#cloud-controller-manager
+
+admin/cloud/ccm-example.yaml
+El RBAC ClusterRole para la nube El gestor de mandos se presenta así:
+# This is an example of how to set up cloud-controller-manager as a Daemonset in your cluster.
+# It assumes that your masters can run pods and has the role node-role.kubernetes.io/master
+# Note that this Daemonset will not work straight out of the box for your cloud, this is
+# meant to be a guideline.
+---
+apiVersion: V1
+kind: ServiceAccount
+metadata:
+  name: cloud-controller-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:cloud-controller-manager
+roleRef:
+  apiGroup: rbac.authotization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: cloud-controller-manager
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    k8s-app: cloud-controller-manager
+  name: cloud-controller-manager
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+     k8s-app: cloud-controller-manager
+  template:
+    metadata:
+      labels:
+        k8s-app: cloud-controller-manager
+    spec:
+      serviceAccountName: cloud-controller-manager
+      containers:
+      - name: cloud-controller-manager
+        # for in-tree providers we use registry.k8s.io/cloud-controller-manager
+        # this can be replaced with any other image for out-of-tree providers
+        image: registry.k8s.io/cloud-controller-manager:v1.8.0
+        command:
+        - /usr/local/bin/cloud-controller-manager
+        - --cloud-provider=[YOUR_CLOUD_PROVIDER] # Add your own cloud
+        - --leader-elect=true
+        - --use-service-account-credentials
+        # flags will vary every cloud provider
+        - --configure-cloud-routes=true
+        - --cluster-cidr=172.17.0.0/16
+       tolerations:
+       # this is required so CCM can bootstrap itself
+       - key: node.cloudprovider.kubernetes.io/unitialized
+         value: "true"
+         effect: NoSchedule
+        # these tolerations are to have the daemonset runnable on control plane nodes
+      # remove them if your control plane nodes should not run pods
+       - key: node-role.kubernetes.io/control-plane

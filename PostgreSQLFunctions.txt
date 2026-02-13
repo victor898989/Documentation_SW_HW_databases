@@ -1,0 +1,735 @@
+Streaming Replication Protocol Interface
+The commands
+• CREATE_REPLICATION_SLOT slot_name LOGICAL output_plugin
+• DROP_REPLICATION_SLOT slot_name [ WAIT ]
+• START_REPLICATION SLOT slot_name LOGICAL ...
+are used to create, drop, and stream changes from a replication slot, respectively. These commands are
+only available over a replication connection; they cannot be used via SQL. See Section 52.4 for details
+on these commands.
+
+
+he command pg_recvlogical can be used to control logical decoding over a streaming replication con
+nection. (It uses these commands internally.)
+48.4. Logical Decoding SQL Interface
+See Section 9.27.6 for detailed documentation on the SQL-level API for interacting with logical decoding.
+Synchronous replication (see Section 26.2.8) is only supported on replication slots used over the streaming
+replication interface. The function interface and additional, non-core interfaces do not support synchronous
+replication.
+48.5. System Catalogs Related to Logical De
+coding
+The pg_replication_slots view and the  pg_stat_replication view provide information
+about the current state of replication slots and streaming replication connections respectively. These views
+apply to both physical and logical replication.
+
+The normal library search path is used to locate the library. To provide the required
+output plugin callbacks and to indicate that the library is actually an output plugin it needs to provide a
+function named _PG_output_plugin_init. This function is passed a struct that needs to be filled
+with the callback function pointers for individual actions.
+typedef struct OutputPluginCallbacks
+{
+    LogicalDecodeStartupCB startup_cb;
+    LogicalDecodeBeginCB begin_cb;
+    LogicalDecodeChangeCB change_cb;
+    LogicalDecodeTruncateCB truncate_cb;
+    LogicalDecodeCommitCB commit_cb;
+    LogicalDecodeMessageCB message_cb;
+    LogicalDecodeFilterByOriginCB filter_by_origin_cb;
+    LogicalDecodeShutdownCB shutdown_cb;
+} OutputPluginCallbacks;
+typedef void (*LogicalOutputPluginInit) (struct OutputPluginCallbacks
+ *cb);
+The begin_cb, change_cb and commit_cb callbacks are required, while startup_cb, fil
+ter_by_origin_cb, truncate_cb, and shutdown_cb are optional. If truncate_cb is not set
+but a TRUNCATE is to be decoded, the action will be ignored.
+
+To decode, format and output changes, output plugins can use most of the backend's normal infrastructure,
+including calling output functions. Read only access to relations is permitted as long as only relations are
+accessed that either have been created by initdb in the pg_catalog schema, or have been marked
+as user provided catalog tables using
+ALTER TABLE user_catalog_table SET (user_catalog_table = true);
+CREATE TABLE another_catalog_table(data text) WITH (user_catalog_table
+ = true);
+Any actions leading to transaction ID assignment are prohibited. That, among others, includes writing to
+tables, performing DDL changes, and calling pg_current_xact_id().
+
+startup_cb callback is called whenever a replication slot is created or asked to stream
+changes, independent of the number of changes that are ready to be put out.
+typedef void (*LogicalDecodeStartupCB) (struct LogicalDecodingContext
+ *ctx,
+                                        OutputPluginOptions *options,
+                                        bool is_init);
+The is_init parameter will be true when the replication slot is being created and false otherwise. op
+tions points to a struct of options that output plugins can set:
+typedef struct OutputPluginOptions
+{
+    OutputPluginOutputType output_type;
+    bool        receive_rewrites;
+} OutputPluginOptions;
+output_type has to either be set to OUTPUT_PLUGIN_TEXTUAL_OUTPUT or OUT
+PUT_PLUGIN_BINARY_OUTPUT. See also Section 48.6.3. If receive_rewrites is true, the output
+plugin will also be called for changes made by heap rewrites during certain DDL operations. These are of
+interest to plugins that handle DDL replication, but they require special handling.
+The startup callback should validate the options present in ctx->output_plugin_options. If the
+output plugin needs to have a state, it can use ctx->output_plugin_private to store it.
+
+linux cgroups v2 kubernetes.
+The required begin_cb callback is called whenever a start of a committed transaction has been decoded.
+Aborted transactions and their contents never get decoded.
+typedef void (*LogicalDecodeBeginCB) (struct LogicalDecodingContext
+ *ctx,
+                                      ReorderBufferTXN *txn);
+The txn parameter contains meta information about the transaction, like the time stamp at which it has
+been committed and its XID.
+48.6.4.4. Transaction End Callback
+The required commit_cb callback is called whenever a transaction commit has been decoded. The
+change_cb callbacks for all modified rows will have been called before this, if there have been any
+modified rows.
+typedef void (*LogicalDecodeCommitCB) (struct LogicalDecodingContext
+ *ctx,
+                                       ReorderBufferTXN *txn,
+                                       XLogRecPtr commit_lsn);
+
+The required change_cb callback is called for every individual row modification inside a transaction,
+may it be an INSERT, UPDATE, or DELETE. Even if the original command modified several rows at once
+the callback will be called individually for each row.
+typedef void (*LogicalDecodeChangeCB) (struct LogicalDecodingContext
+ *ctx,
+                                       ReorderBufferTXN *txn,
+                                       Relation relation,
+                                       ReorderBufferChange *change)
+
+Generic Message Callback
+The optional message_cb callback is called whenever a logical decoding message has been decoded.
+typedef void (*LogicalDecodeMessageCB) (struct LogicalDecodingContext
+ *ctx,
+                                        ReorderBufferTXN *txn,
+                                        XLogRecPtr message_lsn,
+                                        bool transactional,
+                                        const char *prefix,
+                                        Size message_size,
+                                        const char *message);
+The txn parameter contains meta information about the transaction, like the time stamp at which it has
+been committed and its XID. Note however that it can be NULL when the message is non-transactional
+and the XID was not assigned yet in the transaction which logged the message. The lsn has WAL location
+of the message. The transactional says if the message was sent as transactional or not. The prefix
+is arbitrary null-terminated prefix which can be used for identifying interesting messages for the current
+plugin. And finally the message parameter holds the actual message of message_size size.
+
+//idea para copiloto o postgreSQL telemetria transacion de datos
+package co.exaple.types;
+
+import java.io;
+import java.math.*;
+import java.sql.*;
+
+public class Price implements Externalizable
+{
+    // initial version id
+    private static final int FIRST_VERSION = 0;
+    private static fial int TIMESTAMP = new Timestamp( 0L
+ );
+    public String currencyCode;
+    public BigDecimal amount;
+    public Timestamp timeInstant;
+    // 0-arg constructor needed by Externalizable machinery
+    public Price() {
+
+public Price( String currencyCode, BigDecimal amount, 
+                  Timestamp timeInstant )
+    {
+        this.currencyCode = currencyCode;
+        this.amount = amount;
+        this.timeInstant = timeInstant;
+    }
+    // Externalizable implementation
+    public void writeExternal(ObjectOutput out) throws IOException
+    {
+        // first write the version id
+        out.writeInt( TIMESTAMPED_VERSION );
+        // now write the state
+        out.writeObject( currencyCode );
+        out.writeObject( amount );
+        out.writeObject( timeInstant );
+    }
+
+ public void readExternal(ObjectInput in) 
+        throws IOException, ClassNotFoundException
+    {
+        // read the version id
+        int oldVersion = in.readInt();
+        if ( oldVersion < FIRST_VERSION ) { 
+            throw new IOException( "Corrupt data stream." ); 
+        }
+        if ( oldVersion > TIMESTAMPED_VERSION ) {
+
+ throw new IOException( "Can't deserialize from the future."
+ ); 
+        }
+        currencyCode = (String) in.readObject();
+        amount = (BigDecimal) in.readObject();
+        if ( oldVersion >= TIMESTAMPED_VERSION ) {
+            timeInstant = (Timestamp) in.readObject(); 
+        }
+        else { 
+            timeInstant = DEFAULT_TIMESTAMP; 
+        }
+    }
+}
+An application needs to keep its code in sync across all tiers. This is true for all Java
+code which runs both in the client and in the server. This is true for functions and
+procedures which run in multiple tiers. It is also true for user-defined types which run
+in multiple tiers.
+
+A UDA is a Java class that implements the org.apache.derby.agg.Aggregator interface.
+The org.apache.derby.agg.Aggregator interface extends java.io.Serializable, so you
+must make sure that all of the state of your UDA is serializable. A UDA may be serialized
+to disk when it performs grouped aggregation over a large number of groups. That is,
+intermediate results may be serialized to disk for a query like the following:
+SELECT a, myAggregate( b ) FROM myTable GROUP BY a
+The serialization will fail if the UDA contains non-serializable fields.
+The following class provides an aggregate that computes the median value from a list of
+objects. This is a generic class. Its parameter must be a linear (Comparable) type.
+import java.util.ArrayList;
+import java.util.Collections;
+import org.apache.derby.agg.Aggregator;
+public class Median<V extends Comparable<V>> 
+        implements Aggregator<V,V,Median<V>>
+{
+    private ArrayList<V> _values;
+    public Median() {}
+    public void init() { _values = new ArrayList<V>(); }
+    public void accumulate( V value ) { _values.add( value ); }
+    public void merge( Median<V> other )
+    { 
+        _values.addAll( other._values ); 
+    }
+    public V terminate()
+    {
+        Collections.sort( _values );
+
+int count = _values.size();
+if ( count == 0 ) { return null; }
+else { return _values.get( count/2 ); }
+}
+}
+Using this generic class, we can declare UDAs for all of the sortable Derby data types.
+For example:
+create derby aggregate intMedian for int external name 'Median';
+create derby aggregate varcharMedian for varchar( 32672 ) external name
+'Median';
+We can then use these UDAs just like built-in Derby aggregates:
+
+create table intvalues( a int, b int );
+create table varcharValues( a int, b varchar( 32672 ) );
+insert into intValues values ( 1, 1 ), ( 1, 10 ), ( 1, 100),
+  ( 1, 1000 ), (2, 5 ), (2, 50), (2, 500 ), ( 2, 5000);
+insert into varcharValues values ( 1, 'a'), ( 1, 'ab' ), ( 1, 'abc' )
+   (2, 'a'), (2, 'aa'), (2, 'aaa');
+
+select a, intMedia( b ) fromt intValues group by a;
+A       |2
+1
+2
+
+select varcharMedian( b ) fro varcharValues;
+1
+---
+aaa
+See "CREATE DERBY AGGREGATE statement" in the Java DB Reference Manual for
+more information
+
+The following example shows an application establishing three separate connections to
+two different databases in the current system.
+Connection conn = DriverManager.getConnection(
+"jdbc:derby:sample");
+System.out.println("Connected to database sample");
+conn.setAutoCommit(false);
+Connection conn2 = DriverManager.getConnection(
+"jdbc:derby:newDB;create=true");
+System.out.println("Created AND connected to newDB");
+conn2.setAutoCommit(false);
+Connection conn3 = DriverManager.getConnection(
+"jdbc:derby:newDB");
+System.out.println("Got second connection to newDB");
+conn3.setAutoCommit(false);
+A Connection object has no association with any specific thread; during its lifetime, any
+number of threads might have access to it, as controlled by the application.
+Statements
+To execute SQL statements against a database, an application uses
+Statements (java.sql.Statement) and PreparedStatements
+(java.sql.PreparedStatement), or CallableStatements
+(java.sql.CallableStatement) for stored procedures.
+Because PreparedStatement extends Statement and CallableStatement extends
+PreparedStatement, this section refers to both as Statements. Statements are obtained
+from and are associated with a particular Connection.
+ResultSets and Cursors
+Executing a Statement that returns values gives a ResultSet
+(java.sql.ResultSet), allowing the application to obtain the results of the statement.
+
+Only one ResultSet can be open for a particular Statement at any time, as per the
+JDBC specification.
+Thus, executing a Statement automatically closes any open ResultSet generated by an
+earlier execution of that Statement.
+For this reason, you must use a different Statement to update a cursor (a named
+ResultSet)
+
+Committing a transaction also closes all ResultSet objects excluding the ResultSet
+objects associated with cursors with holdability true. The default holdability of the
+cursors is true and ResultSet objects associated with them need to be closed
+explicitly. A commit will not close such ResultSet objects. It also releases any database
+locks currently held by the Connection
+
+An updatable cursor declared to be held across commit (this is the default value)
+can execute updates and issue multiple commits before closing the cursor. After an
+explicit or implicit commit, a holdable forward-only cursor must be repositioned with
+a call to the next method before it can accessed again. In this state, the only other
+valid operation besides calling next is calling close.
+• Database-side JDBC routines (routines using nested connections
+
+. Application behavior with auto-commit on or off
+Topic
+Transactions
+Auto-Commit On
+Each statement is a
+separate transaction.
+Database-side JDBC routines
+(routines that use nested
+connections)
+Updatable cursors
+Auto-Commit Off
+Commit() or rollback()
+completes a transaction.
+Auto-commit is turned
+off.
+Works (no explicit
+commits or rollbacks are
+allowed).
+Works for holdable
+cursors; does not work
+for non-holdable cursors.
+Works.
+
+Multiple connections accessing
+the same data
+Auto-Commit On
+Auto-Commit Off
+Works.
+Updatable ResultSets
+Savepoints
+Works.
+Works. Lower
+concurrency when
+applications use
+SERIALIZABLE isolation
+mode and table-level
+locking.
+Works.
+Does not work.
+Works
+
+To close a Statement, ResultSet, or Connection object that is not declared in a
+try-with-resources statement, use its close method. If auto-commit is disabled, you
+must explicitly commit or roll back active transactions before you close the connection.
+Statements, result sets, and connections extend AutoCloseable in JDK 7 and after. If
+you declare a connection in a try-with-resources statement and there is an error that the
+code does not catch, the JRE will attempt to close the connection automatically.
+Note that a transaction-severity or higher exception causes Derby to abort an
+in-flight transaction. But a statement-severity exception does NOT roll back the
+transaction. Also note that Derby throws an exception if an attempt is made to
+close a connection with an in-flight transaction. Suppose now that a Connection
+is declared in a try-with-resources statement, a transaction is in-flight, and
+an unhandled statement-severity error occurs inside the try-with-resources
+block. In this situation, Derby will raise a follow-on exception as the JRE exits the
+try-with-resources block. (For details on error severity levels, see the documentation of
+the derby.stream.error.logSeverityLevel property in the Java DB Reference
+Manual.)
+
+The Connection.setSavepoint method sets a savepoint within the current transaction. The
+Connection.rollback method is overloaded to take a savepoint argument.
+The code example below inserts a row into a table, sets the savepoint svpt1, and then
+inserts a second row. When the transaction is later rolled back to svpt1, the second
+insertion is undone, but the first insertion remains intact. In other words, when the
+transaction is committed, only the row containing '1' will be added to TABLE1.
+conn.setAutoCommit(false); // Autocommit must be off to use savepoints.
+Statement stmt = conn.createStatement();
+int rows = stmt.executeUpdate("INSERT INTO TABLE1 (COL1) VALUES(1)");
+// set savepoint
+Savepoint svpt1 = conn.setSavepoint("S1");
+rows = stmt.executeUpdate("INSERT INTO TABLE1 (COL1) VALUES (2)");
+...
+conn.rollback(svpt1);
+...
+conn.commit();
+
+In Derby, any SELECT statement generates a cursor which can be controlled by a
+java.sql.ResultSet object. Derby does not support SQL-92's DECLARE CURSOR
+language construct to create cursors, however Derby supports positioned deletes and
+positioned updates of updatable cursors.
+Simple non-updatable result sets
+This example is an excerpt from a sample JDBC application that generates a result set
+with a simple SELECT statement and then processes the rows.
+Connection conn = DriverManager.getConnection(
+"jdbc:derby:sample");
+Statement s = conn.createStatement();
+s.execute("set schema 'SAMP'");
+//note that autocommit is on--it is on by default in JDBC
+ResultSet rs = s.executeQuery(
+"SELECT empno, firstnme, lastname, salary, bonus, comm "
++ "FROM samp.employee");
+/** a standard JDBC ResultSet. It maintains a 
+*  cursor that points to the current row of data. The cursor 
+*  moves down one row each time the method next() is called.
+*  You can scroll one way only--forward--with the next()
+*  method. When auto-commit is on, after you reach the 
+*  last row the statement is considered completed
+*  and the transaction is committed.
+*/
+System.out.println( "last name" + "," + "first name" + ": earnings");
+/* here we are scrolling through the result set 
+with the next() method.*/
+while (rs.next()) {
+// processing the rows
+}
+rs.close();
+String firstnme = rs.getString("FIRSTNME");
+String lastName = rs.getString("LASTNAME");
+BigDecimal salary = rs.getBigDecimal("SALARY");
+BigDecimal bonus = rs.getBigDecimal("BONUS");
+BigDecimal comm = rs.getBigDecimal("COMM"); 
+System.out.println( lastName + ", " + firstnme + ": " 
++ (salary.add(bonus.add(comm))));
+// once we've iterated through the last row,
+// the transaction commits automatically and releases
+//shared locks
+s.close();
+Updatable result sets
+Updatable result sets in Derby can be updated by using result set update methods
+(updateRow(), deleteRow(), and insertRow()), or by using positioned update or
+delete queries.
+Both scrollable and non-scrollable result sets can be updatable in Derby.
+If the query which was executed to create the result set is not updatable, Derby will
+downgrade the concurrency mode to ResultSet.CONCUR_READ_ONLY, and add a
+warning about this on the ResultSet. The compilation of the query fails if the result set
+cannot be updatable, and contains a FOR UPDATE clause.
+
+To create a forward only updatable result set, the statement has to be
+created with concurrency mode ResultSet.CONCUR_UPDATABLE and type
+ResultSet.TYPE_FORWARD_ONLY.
+Note:  The default type is ResultSet.TYPE_FORWARD_ONLY.
+Example of using ResultSet.updateXXX() + ResultSet.updateRow() to update
+a row:
+Statement stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY, 
+ResultSet.CONCUR_UPDATABLE);
+ResultSet uprs = stmt.executeQuery(
+"SELECT FIRSTNAME, LASTNAME, WORKDEPT, BONUS " +
+"FROM EMPLOYEE");
+while (uprs.next()) {
+int newBonus = uprs.getInt("BONUS") + 100;
+uprs.updateInt("BONUS", newBonus);
+uprs.updateRow();
+}
+Example of using ResultSet.deleteRow() to delete a row:
+Statement stmt = conn.createStatement(ResultSet.TYPE_FORWARD_ONLY, 
+ResultSet.CONCUR_UPDATABLE);
+ResultSet uprs = stmt.executeQuery(
+"SELECT FIRSTNAME, LASTNAME, WORKDEPT, BONUS " +
+"FROM EMPLOYEE");
+while (uprs.next()) {
+if (uprs.getInt("WORKDEPT")==300) {
+uprs.deleteRow();
+}
+}
+Visibility of changes
+• After an update or delete is made on a forward only result set, the result set's
+cursor is no longer on the row just updated or deleted, but immediately before
+the next row in the result set (it is necessary to move to the next row before
+any further row operations are allowed). This means that changes made by
+ResultSet.updateRow() and ResultSet.deleteRow() are never visible.
+• If a row has been inserted, i.e using ResultSet.insertRow()
+Derby only supports scrollable insensitive result sets. To create a scrollable
+insensitive result set which is updatable, the statement has to be created
+with concurrency mode ResultSet.CONCUR_UPDATABLE and type
+
+ResultSet.TYPE_SCROLL_INSENSITIVE.
+Example of using result set update methods to update a row:
+Statement stmt =
+conn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, 
+ResultSet.CONCUR_UPDATABLE);
+ResultSet uprs = stmt.executeQuery(
+"SELECT FIRSTNAME, LASTNAME, WORKDEPT, BONUS " +
+"FROM EMPLOYEE");
+uprs.absolute(5); // update the fifth row
+int newBonus = uprs.getInt("BONUS") + 100;
+uprs.updateInt("BONUS", newBonus);
+uprs.updateRow();
+Example of using ResultSet.deleteRow() to delete a row:
+Statement stmt =
+conn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, 
+ResultSet.CONCUR_UPDATABLE);
+ResultSet uprs = stmt.executeQuery(
+"SELECT FIRSTNAME, LASTNAME, WORKDEPT, BONUS " +
+"FROM EMPLOYEE");
+uprs.last();
+uprs.relative(-5); // moves to the 5th from the last row
+uprs.deleteRow(); 
+
+Visibility of changes
+• Changes caused by other statements, triggers and other transactions (others) are
+considered as other changes, and are not visible in scrollable insensitive result sets.
+• Own updates and deletes are visible in Derby's scrollable insensitive result sets.
+Note:  Derby handles changes made using positioned updates and deletes as own
+changes, so when made via a result set's cursor such changes are also visible in
+that result set.
+• Rows inserted to the table may become visible in the result set.
+• ResultSet.rowDeleted() returns true if the row has been deleted using
+the cursor or result set. It does not detect deletes made by other statements or
+transactions. Note that the method will also work for result sets with concurrency
+CONCUR_READ_ONLY if the underlying result set is FOR UPDATE and a cursor
+was used to delete the row.
+• ResultSet.rowUpdated() returns true if the row has been updated using
+the cursor or result set. It does not detect updates made by other statements or
+transactions.
+
+PostgreSQL y Kubernetes
+Using the replication origin infrastructure a session can be marked as replaying from a remote node (using
+the pg_replication_origin_session_setup() function). Additionally the LSN and commit
+time stamp of every source transaction can be configured on a per transaction basis using pg_repli
+cation_origin_xact_setup(). If that's done replication progress will persist in a crash safe man
+ner. Replay progress for all replication origins can be seen in the  pg_replication_origin_s
+tatus  view. An individual origin's progress, e.g., when resuming replication, can be acquired using
+pg_replication_origin_progress() for any origin or pg_replication_origin_ses
+sion_progress()
+
+ALTER EXTENSION
+ALTER EXTENSION — change the definition of an extension
+Synopsis
+ALTER EXTENSION name UPDATE [ TO new_version ]
+ALTER EXTENSION name SET SCHEMA new_schema
+ALTER EXTENSION name ADD member_object
+ALTER EXTENSION name DROP member_object
+where member_object is:
+  ACCESS METHOD object_name |
+  AGGREGATE aggregate_name ( aggregate_signature ) |
+  CAST (source_type AS target_type) |
+  COLLATION object_name |
+  CONVERSION object_name |
+  DOMAIN object_name |
+  EVENT TRIGGER object_name |
+  FOREIGN DATA WRAPPER object_name |
+  FOREIGN TABLE object_name |
+  FUNCTION function_name [ ( [ [ argmode ] [ argname ] argtype
+ [, ...] ] ) ] |
+  MATERIALIZED VIEW object_name |
+  OPERATOR operator_name (left_type, right_type) |
+  OPERATOR CLASS object_name USING index_method |
+  OPERATOR FAMILY object_name USING index_method |
+  [ PROCEDURAL ] LANGUAGE object_name |
+  PROCEDURE procedure_name [ ( [ [ argmode ] [ argname ] argtype
+ [, ...] ] ) ] |
+  ROUTINE routine_name [ ( [ [ argmode ] [ argname ] argtype
+ [, ...] ] ) ] |
+  SCHEMA object_name |
+  SEQUENCE object_name |
+  SERVER object_name |
+  TABLE object_name |
+  TEXT SEARCH CONFIGURATION object_name |
+  TEXT SEARCH DICTIONARY object_name |
+  TEXT SEARCH PARSER object_name |
+  TEXT SEARCH TEMPLATE object_name |
+  TRANSFORM FOR type_name LANGUAGE lang_name |
+  TYPE object_name |
+  VIEW object_name
+and aggregate_signature is:
+* |
+[ argmode ] [ argname ] argtype [ , ... ] |
+[ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ]
+ [ argname ] argtype [ , ... ]
+Description
+ALTER EXTENSION changes the definition of an installed extension. There are several subforms:
+UPDATE
+This form updates the extension to a newer version. The extension must supply a suitable update script
+(or series of scripts) that can modify the currently-installed version into the requested version.
+SET SCHEMA
+This form moves the extension's objects into another schema. The extension has to be relocatable for
+this command to succeed.
+ADD member_object
+This form adds an existing object to the extension. This is mainly useful in extension update scripts.
+The object will subsequently be treated as a member of the extension; notably, it can only be dropped
+by dropping the extension.
+DROP member_object
+This form removes a member object from the extension. This is mainly useful in extension update
+scripts. The object is not dropped, only disassociated from the extension.
+See Section 37.17 for more information about these operations.
+You must own the extension to use ALTER EXTENSION. The ADD/DROP forms require ownership of
+the added/dropped object as well.
+Parameters
+name
+The name of an installed extension.
+new_version
+The desired new version of the extension. This can be written as either an identifier or a string literal.
+If not specified, ALTER EXTENSION UPDATE attempts to update to whatever is shown as the
+default version in the extension's control file.
+new_schema
+The new schema for the extension.
+object_name
+aggregate_name
+function_name
+operator_name
+procedure_name
+routine_name
+The name of an object to be added to or removed from the extension. Names of tables, aggregates,
+domains, foreign tables, functions, operators, operator classes, operator families, procedures, routines,
+sequences, text search objects, types, and views can be schema-qualified.
+source_type
+The name of the source data type of the cast.
+target_type
+The name of the target data type of the cast.
+argmode
+The mode of a function, procedure, or aggregate argument: IN, OUT, INOUT, or VARIADIC. If
+omitted, the default is IN. Note that ALTER EXTENSION does not actually pay any attention to OUT
+arguments, since only the input arguments are needed to determine the function's identity. So it is
+sufficient to list the IN, INOUT, and VARIADIC arguments.
+argname
+The name of a function, procedure, or aggregate argument. Note that ALTER EXTENSION does
+not actually pay any attention to argument names, since only the argument data types are needed to
+determine the function's identity.
+argtype
+The data type of a function, procedure, or aggregate argument.
+left_type
+right_type
+The data type(s) of the operator's arguments (optionally schema-qualified). Write NONE for the miss
+ing argument of a prefix or postfix operator.
+PROCEDURAL
+This is a noise word.
+type_name
+The name of the data type of the transform.
+lang_name
+The name of the language of the transform.
+Examples
+To update the hstore extension to version 2.0:
+ALTER EXTENSION hstore UPDATE TO '2.0';
+To change the schema of the hstore extension to utils:
+ALTER EXTENSION hstore SET SCHEMA utils;
+To add an existing function to the hstore extension:
+
+Description
+ALTER FOREIGN DATA WRAPPER changes the definition of a foreign-data wrapper. The first form
+of the command changes the support functions or the generic options of the foreign-data wrapper (at least
+one clause is required). The second form changes the owner of the foreign-data wrapper.
+Only superusers can alter foreign-data wrappers. Additionally, only superusers can own foreign-data wrap
+pers.
+Parameters
+name
+The name of an existing foreign-data wrapper.
+HANDLER handler_function
+Specifies a new handler function for the foreign-data wrapper.
+NO HANDLER
+This is used to specify that the foreign-data wrapper should no longer have a handler function.
+Note that foreign tables that use a foreign-data wrapper with no handler cannot be accessed.
+VALIDATOR validator_function
+Specifies a new validator function for the foreign-data wrapper.
+Note that it is possible that pre-existing options of the foreign-data wrapper, or of dependent servers,
+user mappings, or foreign tables, are invalid according to the new validator. PostgreSQL does not
+check for this. It is up to the user to make sure that these options are correct before using the modified
+foreign-data wrapper. However, any options specified in this ALTER FOREIGN DATA WRAPPER
+command will be checked using the new validator.
+NO VALIDATOR
+This is used to specify that the foreign-data wrapper should no longer have a validator function.
+1505
+ALTER FOREIGN
+DATA WRAPPER
+OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ] )
+Change options for the foreign-data wrapper. ADD, SET, and DROP specify the action to be performed.
+ADD is assumed if no operation is explicitly specified. Option names must be unique; names and
+values are also validated using the foreign data wrapper's validator function, if any.
+new_owner
+The user name of the new owner of the foreign-data wrapper.
+new_name
+The new name for the foreign-data wrapper.
+Examples
+Change a foreign-data wrapper dbi, add option foo, drop bar:
+ALTER FOREIGN DATA WRAPPER dbi OPTIONS (ADD foo '1', DROP bar);
+Change the foreign-data wrapper dbi validator to bob.myvalidator:
+ALTER FOREIGN DATA WRAPPER dbi VALIDATOR bob.myvalidator;
+Compatibility
+ALTER FOREIGN DATA WRAPPER conforms to ISO/IEC 9075-9 (SQL/MED), except that the HAN
+DLER, VALIDATOR, OWNER TO, and RENAME clauses are extensions.
+See Also
+CREATE FOREIGN DATA WRAPPER, DROP FOREIGN DATA WRAPPER
+
+Synopsis
+ALTER FOREIGN TABLE [ IF EXISTS ] [ ONLY ] name [ * ]
+action [, ... ]
+ALTER FOREIGN TABLE [ IF EXISTS ] [ ONLY ] name [ * ]
+    RENAME [ COLUMN ] column_name TO new_column_name
+ALTER FOREIGN TABLE [ IF EXISTS ] name
+    RENAME TO new_name
+ALTER FOREIGN TABLE [ IF EXISTS ] name
+    SET SCHEMA new_schema
+where action is one of:
+    ADD [ COLUMN ] column_name data_type [ COLLATE collation ]
+ [ column_constraint [ ... ] ]
+    DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
+    ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type
+ [ COLLATE collation ]
+    ALTER [ COLUMN ] column_name SET DEFAULT expression
+    ALTER [ COLUMN ] column_name DROP DEFAULT
+    ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+    ALTER [ COLUMN ] column_name SET STATISTICS integer
+    ALTER [ COLUMN ] column_name SET ( attribute_option = value
+ [, ... ] )
+    ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
+    ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL |
+ EXTENDED | MAIN }
+    ALTER [ COLUMN ] column_name OPTIONS ( [ ADD | SET | DROP ] option
+ ['value'] [, ... ])
+    ADD table_constraint [ NOT VALID ]
+    VALIDATE CONSTRAINT constraint_name
+    DROP CONSTRAINT [ IF EXISTS ]  constraint_name [ RESTRICT |
+ CASCADE ]
+    DISABLE TRIGGER [ trigger_name | ALL | USER ]
+    ENABLE TRIGGER [ trigger_name | ALL | USER ]
+    ENABLE REPLICA TRIGGER trigger_name
+    ENABLE ALWAYS TRIGGER trigger_name
+    SET WITHOUT OIDS
+    INHERIT parent_table
+    NO INHERIT parent_table
+    OWNER TO { new_owner | CURRENT_USER | SESSION_USER }
+    OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ])
+Description
+ALTER FOREIGN TABLE changes the definition of an existing foreign table. There are several subforms:
+
+CREATE CAST
+CREATE CAST — define a new cast
+Synopsis
+CREATE CAST (source_type AS target_type)
+    WITH FUNCTION function_name [ (argument_type [, ...]) ]
+    [ AS ASSIGNMENT | AS IMPLICIT ]
+CREATE CAST (source_type AS target_type)
+    WITHOUT FUNCTION
+    [ AS ASSIGNMENT | AS IMPLICIT ]
+CREATE CAST (source_type AS target_type)
+    WITH INOUT
+    [ AS ASSIGNMENT | AS IMPLICIT ]
+Description
+CREATE CAST defines a new cast. A cast specifies how to perform a conversion between two data types.
+For example,
+SELECT CAST(42 AS float8);
+converts the integer constant 42 to type float8 by invoking a previously specified function, in this case
+float8(int4). (If no suitable cast has been defined, the conversion fails.)
+Two types can be binary coercible, which means that the conversion can be performed “for free” without
+invoking any function. This requires that corresponding values use the same internal representation. For
+instance, the types text and varchar are binary coercible both ways. Binary coercibility is not neces
+sarily a symmetric relationship. For example, the cast from xml to text can be performed for free in the
+present implementation, but the reverse direction requires a function that performs at least a syntax check.
+(Two types that are binary coercible both ways are also referred to as binary compatible.)
+You can define a cast as an I/O conversion cast by using the WITH INOUT syntax. An I/O conversion
+cast is performed by invoking the output function of the source data type, and passing the resulting string
+to the input function of the target data type. In many common cases, this feature avoids the need to write
+a separate cast function for conversion. An I/O conversion cast acts the same as a regular function-based
+cast; only the implementation is different.
+By default, a cast can be invoked only by an explicit cast request, that is an explicit CAST(x AS type
+name) or x::typename construct.
+If the cast is marked AS ASSIGNMENT then it can be invoked implicitly when assigning a value to a
+column of the target data type. For example, supposing that foo.f1 is a column of type text, then:
+INSERT INTO foo (f1) VALUES (42);

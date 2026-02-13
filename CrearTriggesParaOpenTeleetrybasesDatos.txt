@@ -1,0 +1,510 @@
+ A PL/pgSQL Trigger Function for Maintaining a Summary Table
+The schema detailed here is partly based on the Grocery Store  example from The Data Warehouse Toolkit
+by Ralph Kimball.---- Main tables - time dimension and sales fact.-
+CREATE TABLE time_dimension (
+    time_key                    integer NOT NULL,
+    day_of_week                 integer NOT NULL,
+    day_of_month                integer NOT NULL,
+    month                       integer NOT NULL,
+    quarter                     integer NOT NULL,
+    year                        integer NOT NULL
+);
+CREATE UNIQUE INDEX time_dimension_key ON time_dimension(time_key);
+CREATE TABLE sales_fact (
+    time_key                    integer NOT NULL,
+    product_key                 integer NOT NULL,
+1323
+PL/pgSQL — SQL
+Procedural Language
+    store_key                   integer NOT NULL,
+    amount_sold                 numeric(12,2) NOT NULL,
+    units_sold                  integer NOT NULL,
+    amount_cost                 numeric(12,2) NOT NULL
+);
+CREATE INDEX sales_fact_time ON sales_fact(time_key);---- Summary table - sales by time.-
+CREATE TABLE sales_summary_bytime (
+    time_key                    integer NOT NULL,
+    amount_sold                 numeric(15,2) NOT NULL,
+    units_sold                  numeric(12) NOT NULL,
+    amount_cost                 numeric(15,2) NOT NULL
+);
+CREATE UNIQUE INDEX sales_summary_bytime_key ON
+ sales_summary_bytime(time_key);---- Function and trigger to amend summarized column(s) on UPDATE,
+ INSERT, DELETE.-
+CREATE OR REPLACE FUNCTION maint_sales_summary_bytime() RETURNS
+ TRIGGER
+AS $maint_sales_summary_bytime$
+    DECLARE
+        delta_time_key          integer;
+        delta_amount_sold       numeric(15,2);
+        delta_units_sold        numeric(12);
+        delta_amount_cost       numeric(15,2);
+    BEGIN
+        -- Work out the increment/decrement amount(s).
+        IF (TG_OP = 'DELETE') THEN
+            delta_time_key = OLD.time_key;
+            delta_amount_sold = -1 * OLD.amount_sold;
+            delta_units_sold = -1 * OLD.units_sold;
+            delta_amount_cost = -1 * OLD.amount_cost;
+        ELSIF (TG_OP = 'UPDATE') THEN
+            -- forbid updates that change the time_key 
+            -- (probably not too onerous, as DELETE + INSERT is how
+ most
+ allowed',
+            -- changes will be made).
+            IF ( OLD.time_key != NEW.time_key) THEN
+                RAISE EXCEPTION 'Update of time_key : % -> % not
+ NEW.time_key;
+            END IF;
+                                                      OLD.time_key,
+1324
+PL/pgSQL — SQL
+Procedural Language
+            delta_time_key = OLD.time_key;
+            delta_amount_sold = NEW.amount_sold - OLD.amount_sold;
+            delta_units_sold = NEW.units_sold - OLD.units_sold;
+            delta_amount_cost = NEW.amount_cost - OLD.amount_cost;
+        ELSIF (TG_OP = 'INSERT') THEN
+            delta_time_key = NEW.time_key;
+            delta_amount_sold = NEW.amount_sold;
+            delta_units_sold = NEW.units_sold;
+            delta_amount_cost = NEW.amount_cost;
+        END IF;
+        -- Insert or update the summary row with the new values.
+        <<insert_update>>
+        LOOP
+            UPDATE sales_summary_bytime
+                SET amount_sold = amount_sold + delta_amount_sold,
+                    units_sold = units_sold + delta_units_sold,
+                    amount_cost = amount_cost + delta_amount_cost
+                WHERE time_key = delta_time_key;
+            EXIT insert_update WHEN found;
+            BEGIN
+                INSERT INTO sales_summary_bytime (
+                            time_key,
+                            amount_sold,
+                            units_sold,
+                            amount_cost)
+                    VALUES (
+                            delta_time_key,
+                            delta_amount_sold,
+                            delta_units_sold,
+                            delta_amount_cost
+                           );
+                EXIT insert_update;
+            EXCEPTION
+                WHEN UNIQUE_VIOLATION THEN
+                    -- do nothing
+            END;
+        END LOOP insert_update;
+        RETURN NULL;
+    END;
+$maint_sales_summary_bytime$ LANGUAGE plpgsql;
+CREATE TRIGGER maint_sales_summary_bytime
+AFTER INSERT OR UPDATE OR DELETE ON sales_fact
+1325
+PL/pgSQL — SQL
+Procedural Language
+    FOR EACH ROW EXECUTE FUNCTION maint_sales_summary_bytime();
+INSERT INTO sales_fact VALUES(1,1,1,10,3,15);
+INSERT INTO sales_fact VALUES(1,2,1,20,5,35);
+INSERT INTO sales_fact VALUES(2,2,1,40,15,135);
+INSERT INTO sales_fact VALUES(2,3,1,10,1,13);
+SELECT * FROM sales_summary_bytime;
+DELETE FROM sales_fact WHERE product_key = 1;
+SELECT * FROM sales_summary_bytime;
+UPDATE sales_fact SET units_sold = units_sold * 2;
+SELECT * FROM sales_summary_bytime;
+AFTER triggers can also make use of transition tables to inspect the entire set of rows changed by the
+triggering statement. The CREATE TRIGGER command assigns names to one or both transition tables, and
+then the function can refer to those names as though they were read-only temporary tables. Example 42.7
+shows an example:
+
+
+CREATE TABLE emp (
+    empname           text NOT NULL,
+    salary            integer
+);
+CREATE TABLE emp_audit(
+    operation         char(1)   NOT NULL,
+    stamp             timestamp NOT NULL,
+    userid            text      NOT NULL,
+    empname           text      NOT NULL,
+    salary integer
+);
+CREATE OR REPLACE FUNCTION process_emp_audit() RETURNS TRIGGER AS
+ $emp_audit$
+    BEGIN
+        -
+        -- Create rows in emp_audit to reflect the operations
+ performed on emp,
+        -- making use of the special variable TG_OP to work out the
+ operation.
+        -
+
+ IF (TG_OP = 'DELETE') THEN
+            INSERT INTO emp_audit
+                SELECT 'D', now(), current_user, o.* FROM old_table o;
+        ELSIF (TG_OP = 'UPDATE') THEN
+
+INSERT INTO emp_audit
+                SELECT 'U', now(), current_user, n.* FROM new_table n;
+        ELSIF (TG_OP = 'INSERT') THEN
+            INSERT INTO emp_audit
+                SELECT 'I', now(), current_user, n.* FROM new_table n;
+        END IF;
+        RETURN NULL; -- result is ignored since this is an AFTER
+ trigger
+    END;
+$emp_audit$ LANGUAGE plpgsql;
+CREATE TRIGGER emp_audit_ins
+    AFTER INSERT ON emp
+    REFERENCING NEW TABLE AS new_table
+    FOR EACH STATEMENT EXECUTE FUNCTION process_emp_audit();
+CREATE TRIGGER emp_audit_upd
+    AFTER UPDATE ON emp
+    REFERENCING OLD TABLE AS old_table NEW TABLE AS new_table
+    FOR EACH STATEMENT EXECUTE FUNCTION process_emp_audit();
+CREATE TRIGGER emp_audit_del
+    AFTER DELETE ON emp
+    REFERENCING OLD TABLE AS old_table
+    FOR EACH STATEMENT EXECUTE FUNCTION process_emp_audit();
+
+When a PL/pgSQL function is called as an event trigger, several special variables are created automatically
+in the top-level block. They are:
+TG_EVENT
+Data type text; a string representing the event the trigger is fired for.
+TG_TAG
+Data type text; variable that contains the command tag for which the trigger is fired.
+Example 42.8 shows an example of an event trigger function in PL/pgSQL.
+Example 42.8. A PL/pgSQL Event Trigger Function
+This example trigger simply raises a NOTICE message each time a supported command is executed.
+CREATE OR REPLACE FUNCTION snitch() RETURNS event_trigger AS $$
+BEGIN
+    RAISE NOTICE 'snitch: % %', tg_event, tg_tag;
+END;
+$$ LANGUAGE plpgsql;
+CREATE EVENT TRIGGER snitch ON ddl_command_start EXECUTE FUNCTION
+ snitch();
+
+SQL statements and expressions within a PL/pgSQL function can refer to variables and parameters of
+the function. Behind the scenes, PL/pgSQL substitutes query parameters for such references. Parameters
+will only be substituted in places where a parameter or column reference is syntactically allowed. As an
+extreme case, consider this example of poor programming style:
+INSERT INTO foo (foo) VALUES (foo);
+The first occurrence of foo must syntactically be a table name, so it will not be substituted, even if the
+function has a variable named foo. The second occurrence must be the name of a column of the table, so
+it will not be substituted either. Only the third occurrence is a candidate to be a reference to the function's
+variable.
+
+
+PostgreSQL versions before 9.0 would try to substitute the variable in all three cases, leading to
+syntax errors.
+Since the names of variables are syntactically no different from the names of table columns, there can be
+ambiguity in statements that also refer to tables: is a given name meant to refer to a table column, or a
+variable? Let's change the previous example to
+INSERT INTO dest (col) SELECT foo + bar FROM src;
+Here, dest and src must be table names, and col must be a column of dest, but foo and bar might
+reasonably be either variables of the function or columns of src.
+By default, PL/pgSQL will report an error if a name in a SQL statement could refer to either a variable
+or a table column. You can fix such a problem by renaming the variable or column, or by qualifying the
+ambiguous reference, or by telling PL/pgSQL which interpretation to prefer.
+The simplest solution is to rename the variable or column. A common coding rule is to use a different
+naming convention for PL/pgSQL variables than you use for column names. For example, if you consis
+tently name function variables v_something while none of your column names start with v_, no con
+flicts will occur.
+Alternatively you can qualify ambiguous references to make them clear. In the above example, src.foo
+would be an unambiguous reference to the table column. To create an unambiguous reference to a variable,
+declare it in a labeled block and use the block's label (see Section 42.2). For example,
+<<block>>
+DECLARE
+    foo int;
+
+BEGIN
+    foo := ...;
+    INSERT INTO dest (col) SELECT block.foo + bar FROM src;
+Here block.foo means the variable even if there is a column foo in src. Function parameters, as well
+as special variables such as FOUND, can be qualified by the function's name, because they are implicitly
+declared in an outer block labeled with the function's name.
+Sometimes it is impractical to fix all the ambiguous references in a large body of PL/pgSQL code. In
+such cases you can specify that PL/pgSQL should resolve ambiguous references as the variable (which is
+compatible with PL/pgSQL's behavior before PostgreSQL 9.0), or as the table column (which is compatible
+with some other systems such as Oracle).
+To change this behavior on a system-wide basis, set the configuration parameter plpgsql.vari
+able_conflict to one of error, use_variable, or use_column (where error is the factory
+default). This parameter affects subsequent compilations of statements in PL/pgSQL functions, but not
+statements already compiled in the current session. Because changing this setting can cause unexpected
+changes in the behavior of PL/pgSQL functions, it can only be changed by a superuser.
+You can also set the behavior on a function-by-function basis, by inserting one of these special commands
+at the start of the function text:
+
+#variable_conflict error
+#variable_conflict use_variable
+#variable_conflict use_column
+These commands affect only the function they are written in, and override the setting of plpgsql.vari
+able_conflict. An example is
+CREATE FUNCTION stamp_user(id int, comment text) RETURNS void AS $$
+    #variable_conflict use_variable
+    DECLARE
+        curtime timestamp := now();
+    BEGIN
+        UPDATE users SET last_modified = curtime, comment = comment
+          WHERE users.id = id;
+    END;
+$$ LANGUAGE plpgsql
+
+In the UPDATE command, curtime, comment, and id will refer to the function's variable and para
+meters whether or not users has columns of those names. Notice that we had to qualify the reference
+to users.id in the WHERE clause to make it refer to the table column. But we did not have to qualify
+the reference to comment as a target in the UPDATE list, because syntactically that must be a column
+of users. We could write the same function without depending on the variable_conflict setting
+in this way:
+CREATE FUNCTION stamp_user(id int, comment text) RETURNS void AS $$
+    <<fn>>
+    DECLARE
+        curtime timestamp := now();
+    BEGIN
+1329
+PL/pgSQL — SQL
+Procedural Language
+        UPDATE users SET last_modified = fn.curtime, comment =
+ stamp_user.comment
+          WHERE users.id = stamp_user.id;
+    END;
+$$ LANGUAGE plpgsql;
+Variable substitution does not happen in the command string given to EXECUTE or one of its variants. If
+you need to insert a varying value into such a command, do so as part of constructing the string value, or
+use USING, as illustrated in Section 42.5.4.
+Variable substitution currently works only in SELECT, INSERT, UPDATE, and DELETE commands,
+because the main SQL engine allows query parameters only in these commands. To use a non-constant
+name or value in other statement types (generically called utility statements), you must construct the utility
+statement as a string and EXECUTE it.
+
+Statement caching can sometimes have surprising effects on the interpretation of time-sensitive values.
+For example there is a difference between what these two functions do:
+CREATE FUNCTION logfunc1(logtxt text) RETURNS void AS $$
+    BEGIN
+        INSERT INTO logtable VALUES (logtxt, 'now');
+    END;
+$$ LANGUAGE plpgsql;
+and:
+CREATE FUNCTION logfunc2(logtxt text) RETURNS void AS $$
+    DECLARE
+        curtime timestamp;
+    BEGIN
+        curtime := 'now';
+        INSERT INTO logtable VALUES (logtxt, curtime);
+    END;
+$$ LANGUAGE plpgsql;
+
+In the case of logfunc1, the PostgreSQL main parser knows when analyzing the INSERT that the string
+'now' should be interpreted as timestamp, because the target column of logtable is of that type.
+Thus, 'now' will be converted to a timestamp constant when the INSERT is analyzed, and then used
+in all invocations of logfunc1 during the lifetime of the session. Needless to say, this isn't what the
+programmer wanted. A better idea is to use the now() or current_timestamp function.
+In the case of logfunc2, the PostgreSQL main parser does not know what type 'now' should become
+and therefore it returns a data value of type text containing the string now. During the ensuing assignment
+to the local variable curtime, the PL/pgSQL interpreter casts this string to the timestamp type by
+calling the textout and timestamp_in functions for the conversion. So, the computed time stamp is
+updated on each execution as the programmer expects. Even though this happens to work as expected, it's
+not terribly efficient, so use of the now() function
+
+g CREATE OR REPLACE FUNCTION. That way you can just reload the
+file to update the function definition. For example:
+CREATE OR REPLACE FUNCTION testfunc(integer) RETURNS integer AS $$
+          ....
+$$ LANGUAGE plpgsql;
+While running psql, you can load or reload such a function definition file with:
+\i filename.sql
+1331
+PL/pgSQL — SQL
+Procedural Language
+and then immediately issue SQL commands to test the function.
+
+ but instead take care
+to choose a different dollar-quoting delimiter for each level of nesting you need. For example, you might
+write the CREATE FUNCTION command as:
+CREATE OR REPLACE FUNCTION testfunc(integer) RETURNS integer AS $PROC$
+          ....
+$PROC$ LANGUAGE plpgsql;
+Within this, you might use quote marks for simple literal strings in SQL commands and $$ to delimit
+fragments of SQL commands that you are assembling as strings. If you need to quote text that includes
+$$, you could use $Q$, and so on.
+The following chart shows what you have to do when writing quote marks without dollar quoting. It might
+be useful when translating pre-dollar quoting code into something more comprehensible.
+1 quotation mark
+To begin and end the function body, for example:
+CREATE FUNCTION foo() RETURNS integer AS '
+          ....
+' LANGUAGE plpgsql;
+Anywhere within a single-quoted function body, quote marks must appear in pairs.
+2 quotation marks
+For string literals inside the function body, for example:
+a_output := ''Blah'';
+SELECT * FROM users WHERE f_name=''foobar'';
+In the dollar-quoting approach, you'd just write:
+a_output := 'Blah';
+SELECT * FROM users WHERE f_name='foobar';
+which is exactly what the PL/pgSQL parser would see in either case.
+
+When you need a single quotation mark in a string constant inside the function body, for example:
+a_output := a_output || '' AND name LIKE ''''foobar'''' AND xyz''
+The value actually appended to a_output would be:  AND name LIKE 'foobar' AND xyz.
+In the dollar-quoting approach, you'd write:
+a_output := a_output || $$ AND name LIKE 'foobar' AND xyz$$
+being careful that any dollar-quote delimiters around this are not just $$.
+6 quotation marks
+When a single quotation mark in a string inside the function body is adjacent to the end of that string
+constant, for example:
+a_output := a_output || '' AND name LIKE ''''foobar''''''
+The value appended to a_output would then be:  AND name LIKE 'foobar'.
+In the dollar-quoting approach, this becomes:
+a_output := a_output || $$ AND name LIKE 'foobar'$$
+
+4 quotation marks
+When you need a single quotation mark in a string constant inside the function body, for example:
+a_output := a_output || '' AND name LIKE ''''foobar'''' AND xyz''
+The value actually appended to a_output would be:  AND name LIKE 'foobar' AND xyz.
+In the dollar-quoting approach, you'd write:
+a_output := a_output || $$ AND name LIKE 'foobar' AND xyz$$
+being careful that any dollar-quote delimiters around this are not just $$.
+6 quotation marks
+When a single quotation mark in a string inside the function body is adjacent to the end of that string
+constant, for example:
+a_output := a_output || '' AND name LIKE ''''foobar''''''
+The value appended to a_output would then be:  AND name LIKE 'foobar'.
+In the dollar-quoting approach, this becomes:
+a_output := a_output || $$ AND name LIKE 'foobar'$$
+10 quotation marks
+When you want two single quotation marks in a string constant (which accounts for 8 quotation marks)
+and this is adjacent to the end of that string constant (2 more). You will probably only need that if you
+are writing a function that generates other functions, as in Example 42.10. For example:
+a_output := a_output || '' if v_'' ||
+    referrer_keys.kind || '' like ''''''''''
+    || referrer_keys.key_string || ''''''''''
+    then return ''''''  || referrer_keys.referrer_type
+    || ''''''; end if;'';
+The value of a_output would then be:
+if v_... like ''...'' then return ''...''; end if;
+In the dollar-quoting approach, this becomes:
+a_output := a_output || $$ if v_$$ || referrer_keys.kind || $$ like
+ '$$
+    || referrer_keys.key_string || $$'
+    then return '$$  || referrer_keys.referrer_type
+    || $$'; end if;$$;
+
+ WARNING or an ERROR during the compilation of a function. A function which has received a
+WARNING can be executed without producing further messages, so you are advised to test in a separate
+development environment.
+Setting plpgsql.extra_warnings, or plpgsql.extra_errors, as appropriate, to "all" is
+encouraged in development and/or testing environments.
+These additional checks are enabled through the configuration variables plpgsql.extra_warnings
+for warnings and plpgsql.extra_errors for errors. Both can be set either to a comma-separated
+list of checks, "none" or "all". The default is "none". Currently the list of available checks includes:
+shadowed_variables
+Checks if a declaration shadows a previously defined variable.
+strict_multi_assignment
+Some PL/PgSQL commands allow assigning values to more than one variable at a time, such as
+SELECT INTO. Typically, the number of target variables and the number of source variables should
+match, though PL/PgSQL will use NULL for missing values and extra variables are ignored. Enabling
+this check will cause PL/PgSQL to throw a WARNING or ERROR whenever the number of target
+variables and the number of source variables are different.
+too_many_rows
+Enabling this check will cause PL/PgSQL to check if a given query returns more than one row when
+an INTO clause is used. As an INTO statement will only ever use one row, having a query return
+multiple rows is generally either inefficient and/or nondeterministic and therefore is likely an error.
+The following example shows the effect of plpgsql.extra_warnings set to shadowed_vari
+ables:
+SET plpgsql.extra_warnings TO 'shadowed_variables';
+CREATE FUNCTION foo(f1 int) RETURNS int AS $$
+DECLARE
+f1 int;
+BEGIN
+RETURN f1;
+END;
+$$ LANGUAGE plpgsql;
+WARNING:  variable "f1" shadows a previously defined variable
+LINE 3: f1 int;
+        ^
+CREATE FUNCTION
+The below example shows the effects of setting plpgsql.extra_warnings to strict_mul
+ti_assignment: If a name used in a SQL command could be either a column name of a table or a reference to a variable of
+the function, PL/SQL treats it as a column name. This corresponds to PL/pgSQL's plpgsql.vari
+able_conflict = use_column behavior, which is not the default, as explained in Section 42.11.1.
+It's often best to avoid such ambiguities in the first place, but if you have to port a large amount of code
+that depends on this behavior, setting variable_conflict may be the best solution.
+• In PostgreSQL the function body must be written as a string literal. Therefore you need to use dollar
+quoting or escape single quotes in the function body. (See Section 42.12.1.)
+• Data type names often need translation. For example, in Oracle string values are commonly declared as
+being of type varchar2, which is a non-SQL-standard type. In PostgreSQL, use type varchar or
+text instead. Similarly, replace type number with numeric, or use some other numeric data type
+if there's a more appropriate one.
+
+ Anonymous Code Blocks
+PL/Python also supports anonymous code blocks called with the DO statement:
+DO $$
+    # PL/Python code
+$$ LANGUAGE plpythonu;
+An anonymous code block receives no arguments, and whatever value it might return is discarded. Oth
+erwise it behaves just like a function.
+45.6. Trigger Functions
+When a function is used as a trigger, the dictionary TD contains trigger-related values:
+TD["event"]
+contains the event as a string: INSERT, UPDATE, DELETE, or TRUNCATE.
+TD["when"]
+contains one of BEFORE, AFTER, or INSTEAD OF.
+TD["level"]
+contains ROW or STATEMENT.
+TD["new"]
+TD["old"]
+For a row-level trigger, one or both of these fields contain the respective trigger rows, depending on
+the trigger event.
+TD["name"]
+contains the trigger name.
+TD["table_name"]
+contains the name of the table on which the trigger occurred.
+TD["table_schema"]
+contains the schema of the table on which the trigger occurred.
+TD["relid"]
+contains the OID of the table on which the trigger occurred.
+TD["args"]
+If the CREATE TRIGGER command included arguments, they are available in TD["args"][0]
+to TD["args"][n-1].
+1384
+PL/Python — Python
+Procedural Language
+If TD["when"] is BEFORE or INSTEAD OF and TD["level"] is ROW, you can return None or "OK"
+from the Python function to indicate the row is unmodified, "SKIP" to abort the event, or if TD["even
+t"] is INSERT or UPDATE you can return "MODIFY" to indicate you've modified the new row. Other
+wise the return value is ignored.
+45.7. Database Access
+The PL/Python language module automatically imports a Python module called plpy. The functions and
+constants in this module are available to you in the Python code as plpy.foo.
+45.7.1. Database Access Functions
+The plpy module provides several functions to execute database commands:
+plpy.execute(query [, limit])
+Calling plpy.execute with a query string and an optional row limit argument causes that query
+to be run and the result to be returned in a result object.
+If limit is specified and is greater than zero, then plpy.execute retrieves at most limit rows,
+much as if the query included a LIMIT clause. Omitting limit or specifying it as zero results in
+no row limit.
+The result object emulates a list or dictionary object. The result object can be accessed by row number
+and column name. For example:
+rv = plpy.execute("SELECT * FROM my_table", 5)
+returns up to 5 rows from my_table. If my_table has a column my_column, it would be accessed
+as:
+foo = rv[i]["my_column"]
+The number of rows returned can be obtained using the built-in len function.
+The result object has these additional methods:
+nrows()
+Returns the number of rows processed by the command. Note that this is not necessarily the same
+as the number of rows returned. For example, an UPDATE command will set this value but won't
+return any rows (unless RETURNING is used).
+status()
+The SPI_execute() return value.
+colnames()
+coltypes()
+coltypmods()
+Return a list of column names, list of column type OIDs, and list of type-specific type modifiers
+for the columns, respectively.
+
