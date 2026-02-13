@@ -1,0 +1,813 @@
+Enlaces de metricas-miliseconds-contadores:
+
+https://opentelemetry-python.readthedocs.io/en/latest/sdk/metrics.export.html
+https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk/metrics/src/jmh/java/io/opentelemetry/sdk/metrics/MetricAdviceBenchmark.java
+https://www.javadoc.io/doc/io.opentelemetry/opentelemetry-sdk-trace/latest/io/opentelemetry/sdk/trace/package-summary.html
+https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#prometheus-exporter
+jaeger exporter:github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#jaeger-exporter
+configure SDK:https://opentelemetry.io/docs/languages/java/configuration/
+instrumentacion: 
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/examples/extension/build.gradle
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/examples/extension/gradle.properties
+https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/examples/extension/src/main/java/com/example/javaagent/DemoSpanExporter.java
+postgreSQL jdbc driver:
+https://www.postgresql.org/docs/current/role-membership.html
+kubernetes-recursos de la CPU en tiempo de ejecucion resolver probvlema algoritmos hilos(threads)
+CPU recursos/tiempo en nanosecods, x=frecuencia fpga, micro, ALU= registers.punteros a,b,c con ensamblador o Java garbage collector basura y bases de datos PostgreSQL, C++
+
+
+*******************************************************************************************************************************************
+SdkTracerProvider
+Related Packages
+Package
+Description
+io.opentelemetry.sdk.trace.data
+The data format to model traces for export.
+io.opentelemetry.sdk.trace.export
+Utilities that allow tracing services to export data for sampled spans, as well as providing in-process span processing APIs.
+io.opentelemetry.sdk.trace.samplers
+This package contains Samplers for selecting traces that are recorded and exported.
+All Classes and InterfacesInterfacesClasses
+Class
+Description
+IdGenerator
+Interface used by the SdkTracer to generate new SpanIds and TraceIds.
+ReadableSpan
+SDK representation of a Span that can be read.
+ReadWriteSpan
+A combination of the write methods from the Span interface and the read methods from the ReadableSpan interface.
+SdkTracerProvider
+SDK implementation for TracerProvider.
+SdkTracerProviderBuilder
+Builder of SdkTracerProvider.
+SpanLimits
+Class that holds limits enforced during span recording.
+SpanLimitsBuilder
+Builder for SpanLimits.
+SpanProcessor
+SpanProcessor is the interface SdkTracer uses to allow synchronous hooks for when a Span is started or when a Span is ended.
+*****************************************************************************************************************************************
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+package io.opentelemetry.sdk.metrics;
+
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.incubator.metrics.ExtendedLongCounterBuilder;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+
+@BenchmarkMode({Mode.AverageTime})
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 10, time = 1)
+@Fork(1)
+public class MetricAdviceBenchmark {
+
+  static final Attributekey<String> HTTP_REQUEST_METHOD =
+      AttributeKey.stringKey("http.request.method");
+  static final AttributeKey<String> URL_PATH = AttributeKey.stringKey("url.path");
+  static final AttributeKey<String> URL_SCHEME = AttributeKey.stringKey("url.scheme");
+  static final AttributeKey<Long> HTTP_RESPONSE_STATUS_CODE =
+      AttributeKey.longKey("http.responde.status_code");
+  static final AttributeKey<String> HTTP_ROUTE = AttributeKey.stringKey("https.route");
+   static final AttributeKey<String> NETWORK_PROTOCOL_NAME =
+      AttributeKey.stringKey("network.protocol.name");
+  static final AttributeKey<Long> SERVER_PORT = AttributeKey.longKey("server.port");
+  static final AttributeKey<String> URL_QUERY = AttributeKey.stringKey("url.query");
+  static final AttributeKey<String> CLIENT_ADDRESS = AttributeKey.stringKey("client.address");
+  static final AttributeKey<String> NETWORK_PEER_ADDRESS =
+      AttributeKey.stringKey("network.peer.address");
+  static final AttributeKey<String> SERVER_ADDRESS = AttributeKey("server.address");
+  static final AttributeKey<String> USER_AGENT_ORIGINAL =
+      AttributeKey.stringKey("user_agent.original");
+
+  static final List<AttributeKey<?>> httpServerMetricAttributeKeys =
+      Arrays.asList(
+          HTTP_REQUEST_METHOD,
+          URL_SCHEME,
+          HTTP_ROUTE,
+          NETWORK_PROTOCOL_NAME,
+          SERVER_PORT,
+          NETWORK_PROTOCOL_VERSION,
+          SERVER_ADDRESS),
+
+  static Attributes httpServerMetricAttributes() {
+    return Attributes.builder()
+        .put(HTTP_REQUEST_METHOD, "GET")
+        .put(URL_SCHEME, "http")
+        .put(HTTP_RESPONSE_STATUS_CODE, 200)
+        .put(HTTP_ROUTE, "/v1/users/{id}")
+        .put(NETWORK_PROTOCOL_NAME, "http")
+        .put(SERVER_PORT, 8080)
+        .put(NETWORK_PROTOCOL_VERSION, "1.1")
+        .put(SERVER_ADDRESS, "localhost")
+        .build();
+  }
+
+  static Attributes httpServerSpanAttributes() {
+   return Attributes.builder()
+        .put(HTTP_REQUEST_METHOD, "GET")
+        .put(URL_PATH, "/v1/users/123")
+        .put(URL_SCHEME, "http")
+        .put(HTTP_RESPONSE_STATUS_CODE, 200)
+        .put(HTTP_ROUTE, "/v1/users/{id}")
+        .put(NETWORK_PROTOCOL_NAME, "http")
+        .put(SERVER_PORT, 8080)
+        .put(URL_QUERY, "with=email")
+        .put(CLIENT_ADDRESS, "192.168.0.17")
+        .put(NETWORK_PEER_ADDRESS, "192.168.0.17")
+        .put(NETWORK_PEER_PORT, 11265)
+        .put(NETWORK_PROTOCOL_VERSION, "1.1")
+        .put(SERVER_ADDRESS, "localhost")
+        .put(USER_AGENT_ORIGINAL, "okhttp/1.27.2")
+        .build();
+  }
+
+   static final Attributes CACHED_HTTP_SERVER_SPAN_ATTRIBUTES = httpServerSpanAttributes();
+
+  @State(Scope.Benchmark)
+  public static class ThreadState {
+
+    @Param InstrumentParam instrumentParam;
+
+    SdkMeterProvider meterProvider;
+
+    @Setup(Level.Iteration)
+    public void setup() {
+      meterProvider =
+          SdkMeterProvider.builder()
+              .registerMetricReader(InMemoryMetricReader.createDelta())
+              .build();
+      Meter meter = meterProvider.get("meter");
+      instrumentParam.instrument().setup(meter);
+    }
+
+    @TearDown
+    public void tearDown() {
+      meterProvider.shutdown().join(10, TimeUnit.SECONDS);
+
+  }
+ }
+
+ @Benchmark
+ @Threads(1)
+ public void record(ThreadState threadState) {
+   threadState.instrumentParam.instrument().record(1);
+ }
+}
+
+ @SuppressWarnings("ImmutableEnumChecker")
+  public enum InstrumentParam {
+    /**
+     * Record HTTP span attributes without advice. This baseline shows the CPU and memory allocation
+     * independent of advice.
+     */
+ NO_ADVICE_ALL_ATTRIBUTES(
+        new Instrument() {
+          private LongCounter counter;
+
+          @Override
+          void setup(Meter meter) {
+            counter = ((ExtendedLongCounterBuilder) meter.counterBuilder("counter")).build();
+          }
+
+          @Override
+          void record(long value) {
+            counter.add(value, httpServerSpanAttributes());
+          }
+        }),
+    /**
+     * Record HTTP metric attributes without advice. This baseline shows the lower bound if
+     * attribute filtering was done in instrumentation instead of the metrics SDK with advice. It's
+     * not quite fair though because instrumentation would have to separately allocate attributes
+     * for spans and metrics, whereas with advice, we can manage to only allocate span attributes
+     * and a lightweight metrics attributes view derived from span attributes.
+     */
+     NO_ADVICE_FILTERED_ATTRIBUTES(
+         new Instrument() {
+           private LongCounter counter;
+
+           @Override
+           void setup(Meter meter) {
+             counter = ((ExtendedLongCounterBuilder) meter.counterBuilder("counter")).build();
+ }
+
+          @Override
+          void record(long value) {
+            counter.add(value, httpServerMetricAttributes());
+          }
+        }),
+    /**
+     * Record cached HTTP span attributes without advice. This baseline helps isolate the CPU and
+     * memory allocation for recording vs. creating attributes.
+     */
+}
+
+ NO_ADVICE_ALL_ATTRIBUTES_CACHED(
+        new Instrument() {
+          private LongCounter counter;
+
+          @Override
+          void setup(Meter meter) {
+            counter = ((ExtendedLongCounterBuilder) meter.counterBuilder("counter")).build();
+          }
+
+          @Override
+          void record(long value) {
+            counter.add(value, CACHED_HTTP_SERVER_SPAN_ATTRIBUTES);
+          }
+        }),
+    /**
+     * Record HTTP span attributes with advice filtering to HTTP metric attributes. This is meant to
+     * realistically demonstrate a typical HTTP server instrumentation scenario.
+     */
+    ADVICE_ALL_ATTRIBUTES(
+        new Instrument() {
+          private LongCounter counter;
+
+          @Override
+          void setup(Meter meter) {
+            counter =
+                ((ExtendedLongCounterBuilder) meter.counterBuilder("counter"))
+                    .setAttributesAdvice(httpServerMetricAttributeKeys)
+                    .build();
+          }
+
+          @Override
+          void record(long value) {
+            counter.add(value, httpServerSpanAttributes());
+          }
+        }),
+    /**
+     * Record HTTP metric attributes with advice filtering to HTTP metric attributes. This
+     * demonstrates the overhead of advice when no attributes are filtered.
+     */
+    ADVICE_FILTERED_ATTRIBUTES(
+        new Instrument() {
+          private LongCounter counter;
+
+          @Override
+          void setup(Meter meter) {
+            counter =
+                ((ExtendedLongCounterBuilder) meter.counterBuilder("counter"))
+                    .setAttributesAdvice(httpServerMetricAttributeKeys)
+                    .build();
+          }
+
+          @Override
+          void record(long value) {
+            counter.add(value, httpServerMetricAttributes());
+          }
+        }),
+    /**
+     * Record cached HTTP span attributes with advice filtering to HTTP metric attributes. This
+     * isolates the CPU and memory allocation for applying advice vs. creating attributes.
+     */
+    ADVICE_ALL_ATTRIBUTES_CACHED(
+        new Instrument() {
+          private LongCounter counter;
+
+          @Override
+          void setup(Meter meter) {
+            counter =
+                ((ExtendedLongCounterBuilder) meter.counterBuilder("counter"))
+                    .setAttributesAdvice(httpServerMetricAttributeKeys)
+                    .build();
+          }
+
+          @Override
+          void record(long value) {
+            counter.add(value, CACHED_HTTP_SERVER_SPAN_ATTRIBUTES);
+          }
+        });
+
+    private final Instrument instrument;
+
+    InstrumentParam(Instrument instrument) {
+      this.instrument = instrument;
+    }
+
+    Instrument instrument() {
+      return instrument;
+    }
+  }
+
+  private abstract static class Instrument {
+    abstract void setup(Meter meter);
+
+    abstract void record(long value);
+  }
+}
+
+
+**********************************************************************************************************************
+Submodules
+opentelemetry.sdk.metrics.export
+AggregationTemporality
+AggregationTemporality.UNSPECIFIED
+AggregationTemporality.DELTA
+AggregationTemporality.CUMULATIVE
+Buckets
+Buckets.offset
+Buckets.bucket_counts
+ConsoleMetricExporter
+ConsoleMetricExporter.export()
+ConsoleMetricExporter.shutdown()
+ConsoleMetricExporter.force_flush()
+InMemoryMetricReader
+InMemoryMetricReader.get_metrics_data()
+InMemoryMetricReader.shutdown()
+MetricExporter
+MetricExporter.export()
+MetricExporter.force_flush()
+MetricExporter.shutdown()
+MetricExportResult
+MetricExportResult.SUCCESS
+MetricExportResult.FAILURE
+MetricReader
+MetricReader._receive_metrics()
+MetricReader.collect()
+MetricReader.force_flush()
+MetricReader.shutdown()
+PeriodicExportingMetricReader
+PeriodicExportingMetricReader.shutdown()
+PeriodicExportingMetricReader.force_flush()
+ExponentialHistogram
+ExponentialHistogram.data_points
+ExponentialHistogram.aggregation_temporality
+ExponentialHistogram.to_json()
+ExponentialHistogramDataPoint
+ExponentialHistogramDataPoint.attributes
+ExponentialHistogramDataPoint.start_time_unix_nano
+ExponentialHistogramDataPoint.time_unix_nano
+ExponentialHistogramDataPoint.count
+ExponentialHistogramDataPoint.sum
+ExponentialHistogramDataPoint.scale
+ExponentialHistogramDataPoint.zero_count
+ExponentialHistogramDataPoint.positive
+ExponentialHistogramDataPoint.negative
+ExponentialHistogramDataPoint.flags
+ExponentialHistogramDataPoint.min
+ExponentialHistogramDataPoint.max
+ExponentialHistogramDataPoint.exemplars
+ExponentialHistogramDataPoint.to_json()
+Gauge
+Gauge.data_points
+Gauge.to_json()
+Histogram
+Histogram.data_points
+Histogram.aggregation_temporality
+Histogram.to_json()
+HistogramDataPoint
+HistogramDataPoint.attributes
+HistogramDataPoint.start_time_unix_nano
+HistogramDataPoint.time_unix_nano
+HistogramDataPoint.count
+HistogramDataPoint.sum
+HistogramDataPoint.bucket_counts
+HistogramDataPoint.explicit_bounds
+HistogramDataPoint.min
+HistogramDataPoint.max
+HistogramDataPoint.exemplars
+HistogramDataPoint.to_json()
+Metric
+Metric.name
+Metric.description
+Metric.unit
+Metric.data
+Metric.to_json()
+MetricsData
+MetricsData.resource_metrics
+MetricsData.to_json()
+NumberDataPoint
+NumberDataPoint.attributes
+NumberDataPoint.start_time_unix_nano
+NumberDataPoint.time_unix_nano
+NumberDataPoint.value
+NumberDataPoint.exemplars
+NumberDataPoint.to_json()
+ResourceMetrics
+ResourceMetrics.resource
+ResourceMetrics.scope_metrics
+ResourceMetrics.schema_url
+ResourceMetrics.to_json()
+ScopeMetrics
+ScopeMetrics.scope
+ScopeMetrics.metrics
+ScopeMetrics.schema_url
+ScopeMetrics.to_json()
+Sum
+Sum.data_points
+Sum.aggregation_temporality
+Sum.is_monotonic
+Sum.to_json()
+opentelemetry.sdk.metrics.view
+Aggregation
+DefaultAggregation
+DropAggregation
+ExplicitBucketHistogramAggregation
+ExponentialBucketHistogramAggregation
+LastValueAggregation
+SumAggregation
+View
+**********************************************************************************************************************
+classopentelemetry.sdk.metrics.AlignedHistogramBucketExemplarReservoir(boundaries, **kwargs)[source]
+Bases: FixedSizeExemplarReservoirABC
+
+This Exemplar reservoir takes a configuration parameter that is the configuration of a Histogram. This implementation keeps the last seen measurement that falls within a histogram bucket.
+
+Reference:
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#alignedhistogrambucketexemplarreservoir
+
+offer(value, time_unix_nano, attributes, context)[source]
+Offers a measurement to be sampled.
+
+Return type:None
+
+classopentelemetry.sdk.metrics.AlwaysOnExemplarFilter[source]
+Bases: ExemplarFilter
+
+An ExemplarFilter which makes all measurements eligible for being an Exemplar.
+
+Reference:
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#alwayson
+
+should_sample(value, time_unix_nano, attributes, context)[source]
+Returns whether or not a reservoir should attempt to filter a measurement.
+
+Parameters:value (Union[int, float]) – The value of the measurement
+
+timestamp – A timestamp that best represents when the measurement was taken
+
+attributes (Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]) – The complete set of measurement attributes
+
+context (Context) – The Context of the measurement
+
+Return type:bool
+
+classopentelemetry.sdk.metrics.AlwaysOffExemplarFilter[source]
+Bases: ExemplarFilter
+
+An ExemplarFilter which makes no measurements eligible for being an Exemplar.
+
+Using this ExemplarFilter is as good as disabling Exemplar feature.
+
+Reference:
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#alwaysoff
+
+should_sample(value, time_unix_nano, attributes, context)[source]
+Returns whether or not a reservoir should attempt to filter a measurement.
+
+Parameters
+:
+value (Union[int, float]) – The value of the measurement
+
+timestamp – A timestamp that best represents when the measurement was taken
+
+attributes (Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]) – The complete set of measurement attributes
+
+context (Context) – The Context of the measurement
+
+Return type:bool
+
+classopentelemetry.sdk.metrics.Exemplar(filtered_attributes, value, time_unix_nano, span_id=None, trace_id=None)[source]
+Bases: object
+
+A representation of an exemplar, which is a sample input measurement.
+
+Exemplars also hold information about the environment when the measurement was recorded, for example the span and trace ID of the active span when the exemplar was recorded.
+
+Attributes
+trace_id: (optional) The trace associated with a recording span_id: (optional) The span associated with a recording time_unix_nano: The time of the observation value: The recorded value filtered_attributes: A set of filtered attributes which provide additional insight into the Context when the observation was made.
+
+References
+
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/data-model.md#exemplars https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#exemplar
+**************************************************************************************************************************************************************************************************************************************
+filtered_attributes: Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]
+value: Union[int, float]
+time_unix_nano: int
+span_id: Optional[int]= None
+trace_id: Optional[int]= None
+*********************************************************************************************************************************************
+ExemplarFilter determines which measurements are eligible for becoming an Exemplar.
+
+Exemplar filters are used to filter measurements before attempting to store them in a reservoir.
+
+Reference:
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#exemplarfilter
+
+abstractshould_sample(value, time_unix_nano, attributes, context)[source]
+Returns whether or not a reservoir should attempt to filter a measurement.
+
+Parameters
+:
+value (Union[int, float]) – The value of the measurement
+
+timestamp – A timestamp that best represents when the measurement was taken
+
+attributes (Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]) – The complete set of measurement attributes
+
+context (Context) – The Context of the measurement
+
+Return type
+:
+bool
+
+classopentelemetry.sdk.metrics.ExemplarReservoir[source]
+Bases: ABC
+
+ExemplarReservoir provide a method to offer measurements to the reservoir and another to collect accumulated Exemplars.
+
+Note
+
+The constructor MUST accept **kwargs that may be set from aggregation parameters.
+
+Reference:
+https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/sdk.md#exemplarreservoir
+
+abstractoffer(value, time_unix_nano, attributes, context)[source]
+Offers a measurement to be sampled.
+
+Parameters
+:
+value (Union[int, float]) – Measured value
+
+time_unix_nano (int) – Measurement instant
+
+attributes (Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]) – Measurement attributes
+
+context (Context) – Measurement context
+
+Return type
+:
+None
+
+abstractcollect(point_attributes)[source]
+Returns accumulated Exemplars and also resets the reservoir for the next sampling period
+
+Parameters
+:
+point_attributes (Optional[Mapping[str, Union[str, bool, int, float, Sequence[str], Sequence[bool], Sequence[int], Sequence[float]]]]) – The attributes associated with metric point.
+
+Return type
+:
+List[Exemplar]
+
+Returns
+:
+a list of opentelemetry.sdk.metrics._internal.exemplar.exemplar.Exemplar s. Returned exemplars contain the attributes that were filtered out by the aggregator, but recorded alongside the original measurement.
+
+classopentelemetry.sdk.metrics.Meter(instrumentation_scope, measurement_consumer)[source]
+Bases: Meter
+
+See opentelemetry.metrics.Meter.
+
+create_counter(name, unit='', description='')[source]
+Creates a Counter instrument
+
+Parameters
+:
+name – The name of the instrument to be created
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+Counter
+
+create_up_down_counter(name, unit='', description='')[source]
+Creates an UpDownCounter instrument
+
+Parameters
+:
+name – The name of the instrument to be created
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+UpDownCounter
+
+create_observable_counter(name, callbacks=None, unit='', description='')[source]
+Creates an ObservableCounter instrument
+
+An observable counter observes a monotonically increasing count by calling provided callbacks which accept a CallbackOptions and return multiple Observation.
+
+For example, an observable counter could be used to report system CPU time periodically. Here is a basic implementation:
+
+def cpu_time_callback(options: CallbackOptions) -> Iterable[Observation]:
+    observations = []
+    with open("/proc/stat") as procstat:
+        procstat.readline()  # skip the first line
+        for line in procstat:
+            if not line.startswith("cpu"): break
+            cpu, *states = line.split()
+            observations.append(Observation(int(states[0]) // 100, {"cpu": cpu, "state": "user"}))
+            observations.append(Observation(int(states[1]) // 100, {"cpu": cpu, "state": "nice"}))
+            observations.append(Observation(int(states[2]) // 100, {"cpu": cpu, "state": "system"}))
+            # ... other states
+    return observations
+
+meter.create_observable_counter(
+    "system.cpu.time",
+    callbacks=[cpu_time_callback],
+    unit="s",
+    description="CPU time"
+)
+To reduce memory usage, you can use generator callbacks instead of building the full list:
+
+def cpu_time_callback(options: CallbackOptions) -> Iterable[Observation]:
+    with open("/proc/stat") as procstat:
+        procstat.readline()  # skip the first line
+        for line in procstat:
+            if not line.startswith("cpu"): break
+            cpu, *states = line.split()
+            yield Observation(int(states[0]) // 100, {"cpu": cpu, "state": "user"})
+            yield Observation(int(states[1]) // 100, {"cpu": cpu, "state": "nice"})
+            # ... other states
+Alternatively, you can pass a sequence of generators directly instead of a sequence of callbacks, which each should return iterables of Observation:
+
+def cpu_time_callback(states_to_include: set[str]) -> Iterable[Iterable[Observation]]:
+    # accept options sent in from OpenTelemetry
+    options = yield
+    while True:
+        observations = []
+        with open("/proc/stat") as procstat:
+            procstat.readline()  # skip the first line
+            for line in procstat:
+                if not line.startswith("cpu"): break
+                cpu, *states = line.split()
+                if "user" in states_to_include:
+                    observations.append(Observation(int(states[0]) // 100, {"cpu": cpu, "state": "user"}))
+                if "nice" in states_to_include:
+                    observations.append(Observation(int(states[1]) // 100, {"cpu": cpu, "state": "nice"}))
+                # ... other states
+        # yield the observations and receive the options for next iteration
+        options = yield observations
+
+meter.create_observable_counter(
+    "system.cpu.time",
+    callbacks=[cpu_time_callback({"user", "system"})],
+    unit="s",
+    description="CPU time"
+)
+The CallbackOptions contain a timeout which the callback should respect. For example if the callback does asynchronous work, like making HTTP requests, it should respect the timeout:
+
+def scrape_http_callback(options: CallbackOptions) -> Iterable[Observation]:
+    r = requests.get('http://scrapethis.com', timeout=options.timeout_millis / 10**3)
+    for value in r.json():
+        yield Observation(value)
+Parameters
+:
+name – The name of the instrument to be created
+
+callbacks – A sequence of callbacks that return an iterable of Observation. Alternatively, can be a sequence of generators that each yields iterables of Observation.
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+ObservableCounter
+
+create_histogram(name, unit='', description='', *, explicit_bucket_boundaries_advisory=None)[source]
+Creates a Histogram instrument
+
+Parameters
+:
+name (str) – The name of the instrument to be created
+
+unit (str) – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description (str) – A description for this instrument and what it measures.
+
+Return type
+:
+Histogram
+
+create_gauge(name, unit='', description='')[source]
+Creates a Gauge instrument
+
+Parameters
+:
+name – The name of the instrument to be created
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+Gauge
+
+create_observable_gauge(name, callbacks=None, unit='', description='')[source]
+Creates an ObservableGauge instrument
+
+Parameters
+:
+name – The name of the instrument to be created
+
+callbacks – A sequence of callbacks that return an iterable of Observation. Alternatively, can be a generator that yields iterables of Observation.
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+ObservableGauge
+
+create_observable_up_down_counter(name, callbacks=None, unit='', description='')[source]
+Creates an ObservableUpDownCounter instrument
+
+Parameters
+:
+name – The name of the instrument to be created
+
+callbacks – A sequence of callbacks that return an iterable of Observation. Alternatively, can be a generator that yields iterables of Observation.
+
+unit – The unit for observations this instrument reports. For example, By for bytes. UCUM units are recommended.
+
+description – A description for this instrument and what it measures.
+
+Return type
+:
+ObservableUpDownCounter
+
+classopentelemetry.sdk.metrics.MeterProvider(metric_readers=(), resource=None, exemplar_filter=None, shutdown_on_exit=True, views=())[source]
+Bases: MeterProvider
+
+See opentelemetry.metrics.MeterProvider.
+
+Parameters
+:
+metric_readers (Sequence[MetricReader]) – Register metric readers to collect metrics from the SDK on demand. Each opentelemetry.sdk.metrics.export.MetricReader is completely independent and will collect separate streams of metrics. TODO: reference PeriodicExportingMetricReader usage with push exporters here.
+
+resource (Optional[Resource]) – The resource representing what the metrics emitted from the SDK pertain to.
+
+shutdown_on_exit (bool) – If true, registers an atexit handler to call MeterProvider.shutdown
+
+views (Sequence[View]) – The views to configure the metric output the SDK
+
+By default, instruments which do not match any opentelemetry.sdk.metrics.view.View (or if no opentelemetry.sdk.metrics.view.Views are provided) will report metrics with the default aggregation for the instrument’s kind. To disable instruments by default, configure a match-all opentelemetry.sdk.metrics.view.View with DropAggregation and then create opentelemetry.sdk.metrics.view.Views to re-enable individual instruments:
+
+Disable default views
+MeterProvider(
+    views=[
+        View(instrument_name="*", aggregation=DropAggregation()),
+        View(instrument_name="mycounter"),
+    ],
+    # ...
+)
+force_flush(timeout_millis=10000)[source]
+Return type
+:
+bool
+
+shutdown(timeout_millis=30000)[source]
+get_meter(name, version=None, schema_url=None, attributes=None)[source]
+Returns a Meter for use by the given instrumentation library.
+
+For any two calls it is undefined whether the same or different Meter instances are returned, even for different library names.
+
+This function may return different Meter types (e.g. a no-op meter vs. a functional meter).
+
+Parameters
+:
+name (str) –
+
+The name of the instrumenting module. __name__ may not be used as this can result in different meter names if the meters are in different files. It is better to use a fixed string that can be imported where needed and used consistently as the name of the meter.
+
+This should not be the name of the module that is instrumented but the name of the module doing the instrumentation. E.g., instead of "requests", use "opentelemetry.instrumentation.requests".
+
+version (Optional[str]) – Optional. The version string of the instrumenting library. Usually this should be the same as importlib.metadata.version(instrumenting_library_name)
+*************************************************************************************************************************************************************************************************************************************************************************************
